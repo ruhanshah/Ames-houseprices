@@ -1,0 +1,370 @@
+---
+title: "Ames houseprices- EDA"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Overlook of the data
+
+Here we load the data and all of the packages we will be using. 
+
+```
+load("AmesST404.Rdata")
+library(rio)
+library(knitr)
+library(dplyr)
+library(ggplot2)
+library(gclus)
+library(GGally)
+library(rworldmap)
+library(ggmosaic)
+library(plyr)
+library(corrplot)
+library(visdat)
+library(funModeling)
+library(car)
+library(dlookr)
+library(VIM)
+library(car)
+library(inspectdf)
+library(DataExplorer)
+library(skimr)
+library(PerformanceAnalytics)
+library(moments)
+```
+
+We now look at some summaries and basic plots with the aim of getting an initial understanding of the data.
+```
+summary(AmesST404)
+vis_dat(AmesST404,sort_type = TRUE) 
+vis_miss(AmesST404, cluster = T)
+str(AmesST404)
+skim_without_charts(AmesST404)
+show_plot(inspect_cat(AmesST404))
+```
+From this we can see that there is some missing data which we will explore further later.
+
+Convert all of the character variables into factors- here is an example for MSZoning:
+```
+AmesST404$MSZoning <- as.factor(AmesST404$MSZoning) 
+```
+
+## Initial look at variables
+
+Now we have a look at each of the variables individually to better understand their distributions as well as having a look at the relationships between the response variable and explanatory variables.
+
+Here is an example for lot size:
+```
+summary(AmesST404$LotArea)
+plot(AmesST404$LotArea)
+hist(AmesST404$LotArea)
+# From this histogram we can see that there are very few houses with a Lot Area of over 50,000 so lets look at 
+# the ones less than this
+hist(AmesST404$LotArea[AmesST404$LotArea < 50000])
+length(AmesST404$LotArea[AmesST404$LotArea > 50000])
+hist(AmesST404$LotArea[AmesST404$LotArea < 16000])
+# Roughly normally distributed in the range 0-16,000
+plot(x = AmesST404$LotArea[AmesST404$LotArea < 16000], y = AmesST404$SalePrice[AmesST404$LotArea < 16000]/1000, 
+     main = "scatterplot of lot area (under 16,000 square feet) against price (in $1000)",
+     xlab="lot area", ylab = "price")
+# Very little correlation between lot area and price, slight upwards tendency from 11,000 feet onwards
+plot(x = AmesST404$LotArea, y = AmesST404$SalePrice/1000, 
+     main = "scatterplot of lot area against price (in $1000)",
+     xlab="lot area", ylab = "price")
+# Very little correlation for all houses
+plot(x = AmesST404$LotArea[AmesST404$LotArea < 50000], y = AmesST404$SalePrice[AmesST404$LotArea < 50000]/1000, 
+     main = "scatterplot of lot area (under 50,000 square feet) against price (in $1000)",
+     xlab="lot area", ylab = "price")
+# Again very little correlation for all houses with a lot less than 50,000 square feet
+```
+As you can see here we looked at the distribution of lot area and then introduced certain conditions to better understand it.
+
+Here is another example for total basement area:
+```
+summary(AmesST404$TotalBsmtSF)
+plot(AmesST404$TotalBsmtSF)
+TotalBsmtSF <- AmesST404$TotalBsmtSF[AmesST404$TotalBsmtSF != 0]
+TotalBsmtSF2 <- TotalBsmtSF[is.na(TotalBsmtSF) == FALSE]
+# This excludes the houses without Basements as either missing value or zero value
+summary(TotalBsmtSF2)
+SalePriceBsmtSF <- AmesST404$SalePrice[AmesST404$TotalBsmtSF != 0]
+SalePriceBsmtSF2 <- SalePriceBsmtSF[is.na(TotalBsmtSF) == FALSE]
+plot(x= TotalBsmtSF2, y = SalePriceBsmtSF2)
+# General upwards trend excluding the outliers so lets remove them
+TotalBsmtSF3 <- TotalBsmtSF2[TotalBsmtSF2<= 2500]
+SalePriceBsmtSF3 <- SalePriceBsmtSF2[TotalBsmtSF2<= 2500]
+plot(x= TotalBsmtSF3, y = SalePriceBsmtSF3)
+hist(AmesST404$TotalBsmtSF)
+hist(TotalBsmtSF2)
+hist(TotalBsmtSF3)
+hist(sqrt(TotalBsmtSF3), breaks=30)
+qqplot(x= AmesST404$TotalBsmtSF, y= AmesST404$SalePrice)
+qqplot(x= (TotalBsmtSF), y= AmesST404$SalePrice)
+qqplot(x= (TotalBsmtSF2), y= AmesST404$SalePrice)
+qqPlot(AmesST404$TotalBsmtSF)
+qqPlot(TotalBsmtSF2)
+```
+Again we looked at the distribution of total basement area and then removed missing values or houses without a basement to better understand this distribution. We then additionally removed outliers to gain a better understanding. We also looked at its relationship with sale price and checked its linearity and homoscedasticity with a future goal of potentially implementing a transformation.
+
+In a similar manner we went through the other 29 explanatory variables in order to gain a better understanding of them.
+
+We also looked at the response variable, sale price:
+```
+summary(AmesST404$SalePrice)
+plot(AmesST404$SalePrice)
+qqPlot(AmesST404$SalePrice)
+hist(AmesST404$SalePrice)
+hist(AmesST404$SalePrice/1000)
+hist(log(AmesST404$SalePrice))
+hist(sqrt(AmesST404$SalePrice), breaks=100)
+```
+
+## Missing data
+
+As stated before we were made aware of the missing data when having an initial look at the data and so we now explore this further. 
+```
+MissingData <- colSums(is.na(AmesST404)) 
+MissingData
+MissingDataProportion <- colSums(is.na(AmesST404))/nrow(AmesST404)
+MissingDataProportion
+aggr(AmesST404, prop = TRUE, numbers = TRUE, sortVars = TRUE,
+     sortCombs = TRUE, cex.axis = 0.5, cex.numbers = 0.6, combined = TRUE)
+aggr(AmesST404, prop = TRUE, numbers = TRUE, sortVars = TRUE, sortCombs
+= TRUE, cex.axis = 0.5, cex.numbers = 0.6, combined = FALSE)
+```
+From this we can see that there is missing data for lot size, total basement area, basement full bathrooms, basement half bathrooms, interior finish of the garage, size of garage and garage condition.
+There is a substantial amount of missing data for lot size (roughly 6%) and total basement area (roughly 5%).
+
+We now further investigate the missing data for lot size and total basement area to determine if the data is missing completely at random (MCAR), missing at random (MAR) or missing not at random (MNAR).
+
+Lets look at the missing data for lot size.
+Initially we check lot size against all other variables to see if there is a relationship.
+```
+for (j in 2:32){ if (j == 3) { next } 
+pbox(AmesST404[,c(j,3)], pch = c(20), cex.numbers = 0.25, cex.axis = 0.5) }
+```
+From this we can see that the distributions vary when compared to first floor size, second floor size, half baths above ground, number of fireplaces, fireplace quality and interior finish of the garage.
+Since the distributions vary (e.g. the medians) this suggests we do not have MCAR.
+We now look at their marginplots to figure out if it is MAR or MNAR.
+```
+#FstFlrSF 
+marginplot(AmesST404[,c(10,3)], pch = c(20))#FstFlrSF 
+# Might be MAR- red points are distributed along the axis in a similar fashion to the blue dots suggesting this
+
+#SndFlrSF 
+marginplot(AmesST404[,c(11,3)], pch = c(20))
+# Might be MAR- our points still are distributed along the axis in a similar fashion to the blue dots which suggests MAR
+
+#HalfBath 
+marginplot(AmesST404[,c(16,3)], pch = c(20)) 
+# Upon further investigation, this might not be MAR or MNAR. The distribution seemed different due to the small amount of data missing making it hard to infer from the plot
+
+#Fireplaces 
+marginplot(AmesST404[,c(19,3)], pch = c(20)) 
+# Upon further investigation, this might not be MAR or MNAR as thedistribution seemed different due to the small amount of data missing making it hard to infer from the plot
+
+#FireplaceQu 
+marginplot(AmesST404[,c(20,3)], pch = c(20)) 
+#Upon further investigation, this might not be MAR or MNAR as the distribution seemed different due to the small amount of data missing making it hard to infer from the plot
+
+#GarageFinish 
+marginplot(AmesST404[,c(21,3)], pch = c(20)) 
+#Upon further investigation, this might not be MAR or MNAR as the distribution seemed different due to the small amount of data missing making it hard to infer from the plot
+```
+From these marginplots it seems that the missing data is MAR. This ismainly explained by first floor size and second floor size (as the rest have such a small amount missing so we can't properly draw conclusions from them)- so we cannot exclude it.
+
+
+Now we will do the same for total basement area to determine which category the missing data we have falls in.
+```
+for (j in 2:32){ if (j == 9) { next } 
+pbox(AmesST404[,c(j,9)], pch = c(20), cex.numbers = 0.25, cex.axis = 0.5) }
+```
+From these boxplots we can see that the distributions vastly vary when compared to kitchen quality, fireplace quality, interior finish of the garage and wood deck.
+Since the distributions vary (e.g. the medians) this suggests we do not have MCAR.
+We now look at their marginplots to figure out if it is MAR or MNAR.
+```
+#KitchenQual 
+marginplot(AmesST404[,c(20,9)], pch = c(20)) 
+# The median missing observations are in the 'Good' category, whereas the median for the observed data is in the 'TA' category. This may suggest MNAR, as they do not follow the same pattern.
+
+#FireplaceQu 
+marginplot(AmesST404[,c(17,9)], pch = c(20)) 
+# Upon further investigation, this might not be MAR or MNAR, distribution seemed different due to the small amount of data missing. Perhaps an increased amount of missing data would bring the Q3 down to be Q2 as well, since most data is in categories 3 and 4 making it hard to draw conclusions from this marginplot.
+
+#GarageFinish 
+marginplot(AmesST404[,c(21,9)], pch = c(20))
+# This may potentially may be MNAR but doesn't seem likely as a lot of data lies in 3 and 4 so Q1 should increase with more spread out data.
+
+#WoodDeckSF 
+marginplot(AmesST404[,c(24,9)], pch = c(20)) 
+# Clearly looks like MAR as our points are distributed along the axis in a similar fashion to the blue dots which is characteristic for MAR.
+```
+From these it seems that the missing data is MAR- which looks clear from wood deck- so we cannot exclude it.
+So overall the missing data for lot size and total basement area is Missing At Random (MAR).
+
+## Transformations
+Initially we looked at the response variable, sale price, looking at its distribution via a histogram as well as a normal Q-Q plot to assess homoscedasticity of the errors.
+```
+hist(AmesST404$SalePrice)
+hist(AmesST404$SalePrice/1000)
+hist(log(AmesST404$SalePrice/1000))
+hist(sqrt(AmesST404$SalePrice/1000))
+qqPlot((AmesST404$SalePrice/1000))
+qqPlot(log(AmesST404$SalePrice/1000))
+qqPlot(sqrt(AmesST404$SalePrice/1000))
+# Log transformation looks the best for improving linearity
+par(mfrow=c(1,4))
+hist(AmesST404$SalePrice/1000, main= "Histogram of Sale Price")
+qqPlot((AmesST404$SalePrice/1000), main= "Normal Q-Q plot of Sale Price")
+hist(log(AmesST404$SalePrice/1000), main= "Histogram of log(Sale Price)")
+qqPlot(log(AmesST404$SalePrice/1000), main= "Normal Q-Q plot of log(Sale Price)")
+```
+As you can see above we determined that a log transformation looks best as it makes it linear and homoscedastic. 
+
+Then we looked at all of the numerical (continuous and count) explanatory variables- looking at their distribution, homoscedasticity as well as the response variable dependent on them.
+Initially we would plot a histogram, a normal Q-Q plot and the residual plots of the response variable dependent on them for all of these variables. 
+Here is an example of us doing this for total basement area:
+```
+hist(AmesST404$TotalBsmtSF)
+qqPlot(AmesST404$TotalBsmtSF)
+plot(lm(AmesST404$SalePrice~AmesST404$TotalBsmtSF))
+```
+We then determined that all of the continuous explanatory variables required a transformation.
+So we then tested transformations on each of them aiming to have linearity and homoscedasticity.
+
+Here is an example of us doing this for lot size, where we determine that you should take a log transformation on both sale price and lot size when you are looking at their relationship.
+```
+hist(AmesST404$LotArea)
+qqPlot(AmesST404$LotArea)
+qqPlot(sqrt(AmesST404$LotArea))
+qqPlot(log(AmesST404$LotArea))
+plot(lm(AmesST404$SalePrice~AmesST404$LotArea), which=2)
+plot(lm(log(AmesST404$SalePrice)~ log(AmesST404$LotArea)), which=2)
+# Normality if you take a log on both variables
+par(mfrow=c(1,3))
+hist(AmesST404$LotArea, main = "Histogram of lot area")
+plot(lm(AmesST404$SalePrice~AmesST404$LotArea), which=2,)
+plot(lm(log(AmesST404$SalePrice)~ log(AmesST404$LotArea)), which=2, main= "both variables log transformed")
+```
+We used a similar method for all of the variables.
+
+For the total basement area we initially thought it required a transformation but when testing this out we realised this was not the case and it was actually linear and homoscedastic when you remove outliers but this is not something you can do.
+Here is the code for this: (TotalBsmtSF3 is the total basement area without outliers)
+```
+hist(AmesST404$TotalBsmtSF)
+hist(TotalBsmtSF3, breaks=20)
+hist(sqrt(TotalBsmtSF3), breaks=30)
+qqplot(x= AmesST404$TotalBsmtSF, y= AmesST404$SalePrice)
+qqplot(x= (TotalBsmtSF), y= AmesST404$SalePrice[TotalBsmtSF])
+qqplot(x= (TotalBsmtSF3), y= AmesST404$SalePrice)
+qqPlot(AmesST404$TotalBsmtSF)
+qqPlot(TotalBsmtSF3)
+plot(lm(SalePriceBsmtSF3~TotalBsmtSF3))
+# Just need to remove outliers for linearity
+par(mfrow=c(1,4))
+hist(AmesST404$TotalBsmtSF, main= "Histogram of Total Basement Area")
+qqPlot(AmesST404$TotalBsmtSF, main= "Normal Q-Q plot of Total Basement Area")
+hist(TotalBsmtSF3, main= "Histogram of Total Basement Area (without outliers)")
+qqPlot(TotalBsmtSF3, main= "Normal Q-Q plot of Total Basement Area (without outliers)")
+```
+
+Then we looked at the count variables to determine if they need transformations.
+
+From the initial plots of the numerical explanatory variables we determined that the count variable that needed a transformation was total rooms above ground.
+So we investigated this further:
+```
+hist(TotRmsAbvGrd)
+hist(sqrt(TotRmsAbvGrd))
+hist(log(TotRmsAbvGrd), breaks = 10)
+plot(lm(SalePrice~TotRmsAbvGrd))
+plot(lm(SalePrice~sqrt(TotRmsAbvGrd)))
+qqPlot(TotRmsAbvGrd)
+qqPlot(sqrt(TotRmsAbvGrd))
+# Looks better with a square root transformation but does this make sense????
+par(mfrow=c(1,4))
+hist(TotRmsAbvGrd, main= "Histogram of total rooms above ground")
+qqPlot(TotRmsAbvGrd, main= "Normal Q-Q plot of total rooms above ground")
+hist(sqrt(TotRmsAbvGrd), main= "Histogram of square root of total rooms above ground")
+qqPlot(sqrt(TotRmsAbvGrd), main= "Normal Q-Q plot of square root of total rooms above ground")
+```
+From this we found that a square root transformation was best in implementing linearity. 
+However making this transformation seems illogical so we decided against it.
+
+
+## Correlation
+
+We initially looked at the correlation between sale price and the continuous explanatory variables using ggpairs.
+```
+datapairs =  AmesST404[,c(3,9,10,11,12,22,24,25,26,27,28)] 
+# This creates a pair between the response variable and all of the continuous explanatory variables
+ggpairs(datapairs) 
+# This tests the correlation for these pairs
+```
+
+We then investigated this further using correlation plots but did this for all of the numerical explanatory variables.
+```
+numericVars <- which(sapply(AmesST404, is.numeric)) 
+# Creates an index vector of all the numerical variables
+AmesST404_numVar <- AmesST404[, numericVars] 
+# Creates a new data frame/set with only the numerical variables
+cor_numVar <- cor(AmesST404_numVar, use="pairwise.complete.obs") 
+# Looks at the pairwise correlation of all of the numerical variables
+cor_numVar
+# Sort the correlations into a matrix of decreasing correlations of the numerical explanatory variables with SalePrice
+cor_sorted <- as.matrix(sort(cor_numVar[,'SalePrice'], decreasing = TRUE)) 
+#This generates a 1 column matrix of correlations of sale price against variables with decreasing correlations
+cor_sorted
+# Now lets just look at the variables with a high correlation with sale price 
+# Take 0.3 to consider the existence of correlation with Sale Price (i.e a high correlation)
+CorHigh <- names(which(apply(cor_sorted, 1, function(x) abs(x)>0.3)))
+CorHigh
+cor_numVar <- cor_numVar[CorHigh, CorHigh]
+cor_numVar
+corrplot.mixed(cor_numVar, tl.col="black", tl.pos = "lt")
+```
+
+We then looked at the correlation between sale price and the factor explanatory variables.
+```
+plot(AmesST404$MSZoning, AmesST404$SalePrice/1000)
+plot(AmesST404$OverallCond, AmesST404$SalePrice/1000)
+AmesST404$ExterCond = factor(AmesST404$ExterCond, c("Po", "Fa", "TA", "Gd", "Ex"))
+plot(AmesST404$ExterCond, AmesST404$SalePrice/1000)
+```
+
+We then looked at correlation between the explanatory variables in the cases where the correlation seemed substantial.
+```
+#FstFlr
+plot(FstFlrSF~KitchenQual) #definitely 
+plot(FstFlrSF~TotRmsAbvGrd)
+# This correlation makes sense as a larger first floor allows for more rooms- so keep both variables
+plot(FstFlrSF~FireplaceQu) 
+# This correlation makes sense as a larger first floor allows for more fireplaces- so keep both variables
+
+#SndFlr
+plot(SndFlrSF~FullBath) 
+# This correlation makes sense as a larger second floor allows for more full bathrooms- so keep both variables
+plot(SndFlrSF~HalfBath)
+# This correlation makes sense as a larger second floor allows for more half bathrooms- so keep both variables
+plot(SndFlrSF~TotRmsAbvGrd) 
+# This correlation makes sense as a larger second floor allows for more rooms above ground- so keep both variables
+
+#GarageArea
+plot(GarageArea~OverallCond) 
+# Hard to draw inferences as the data is not very spread out between the categories for overall condition
+# So worth keeping both variables
+plot(GarageArea~KitchenQual) 
+# Doesn't make much sense for the correlation however this correlation is quite small so worth keeping both variables 
+
+#PoolArea
+plot(PoolArea~PoolQC)
+# The correlation makese sense however we will probably remove both of these variables as they are not applicable to the vast majority of the houses we are looking at
+```
+
+Finally we wanted to assess seasonality by comparing sale price to the month sold for the house
+```
+table(AmesST404$MoSold)
+barplot(table(AmesST404$MoSold))
+```

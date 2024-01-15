@@ -1,0 +1,169 @@
+---
+title: "Ames houseprices- creating models"
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+---
+Loading in the data and the required packages.
+```
+load("AmesST404.Rdata")
+library(car)
+library(olsrr)
+library(VIM)
+library(ggplot2)
+library(relaimpo)
+library(caret)
+library(MASS)
+library(gglasso)
+library(glmnet)
+```
+
+## Data cleaning
+```
+AmesST404<-regressionImp(LotArea~TotalBsmtSF,data=AmesST404) #Imputing LotArea using TotalBsmtSF
+AmesST404 <- na.omit(AmesST404) #Removing MCAR values
+AmesST404$TotalAreaAbvGrd <- AmesST404[,"FstFlrSF"] + AmesST404[, "SndFlrSF"] #Combining 1st and 2nd floor area
+AmesST404$TotalBath <- as.numeric(AmesST404$BsmtFullBath) + as.numeric(AmesST404$BsmtHalfBath) + as.numeric(AmesST404$FullBath) + as.numeric(AmesST404$HalfBath) #Combining bathrooms
+AmesST404$logSalePrice <- log(AmesST404$SalePrice) #Logging SalePrice
+AmesST404$logLotArea <- log(AmesST404$LotArea) #Logging LotArea
+AmesST404$WoodDeckInd <- as.numeric(AmesST404$WoodDeckSF>0)
+AmesST404$MSZoning <- as.factor(AmesST404$MSZoning)
+AmesST404$LandContour <- as.factor(AmesST404$LandContour)
+AmesST404$OverallCond <- as.factor(AmesST404$OverallCond)
+AmesST404$ExterCond <- as.factor(AmesST404$ExterCond)
+AmesST404$Foundation <- as.factor(AmesST404$Foundation)
+AmesST404$KitchenQual <- as.factor(AmesST404$KitchenQual)
+AmesST404$Fireplaces <- as.factor(AmesST404$Fireplaces)
+AmesST404$GarageFinish <- as.factor(AmesST404$GarageFinish) 
+```
+
+## Stepwise selection
+Here we use AIC and BIC from minimal and maximal models.
+```
+min_model <- lm(logSalePrice ~ 1, data=AmesST404)
+max_model <- lm(logSalePrice ~ logLotArea + MSZoning + LandContour + OverallCond + ExterCond + Foundation + TotalBsmtSF + TotalAreaAbvGrd + TotalBath + KitchenQual + TotRmsAbvGrd + Fireplaces + FireplaceQu + GarageFinish + GarageArea + WoodDeckInd + OpenPorchSF + EnclosedPorch + ScreenPorch, data=AmesST404)
+step_AIC_from_min <- step(min_model, direction="both", scope=list(lower=min_model, upper=max_model), k=2) #Stepwise using AIC starting at minimal model
+step_AIC_from_max <- step(max_model, direction="both", scope=list(lower=min_model, upper=max_model), k=2) #Stepwise using AIC starting at minimal model
+step_BIC_from_min <- step(min_model, direction="both", scope=list(lower=min_model, upper=max_model), k=log(2901)) #Stepwise using BIC starting at minimal model
+step_BIC_from_max <- step(max_model, direction="both", scope=list(lower=min_model, upper=max_model), k=log(2901)) #Stepwise using BIC starting at maximal model
+```
+
+## Creating new data frame
+Here we create a new data frame excluding the variables that have been removed from the stepwise selection.
+```
+AmesPS <- data.frame(AmesST404$logSalePrice, AmesST404$logLotArea, AmesST404$MSZoning, AmesST404$LandContour, AmesST404$OverallCond, AmesST404$ExterCond, AmesST404$Foundation, AmesST404$TotalBsmtSF, AmesST404$TotalAreaAbvGrd, AmesST404$TotalBath, AmesST404$KitchenQual, AmesST404$Fireplaces, AmesST404$FireplaceQu, AmesST404$GarageFinish, AmesST404$GarageArea, AmesST404$WoodDeckInd, AmesST404$ScreenPorch)
+names(AmesPS) <- c("logSalePrice", "logLotArea", "MSZoning", "LandContour", "OverallCond", "ExterCond", "Foundation", "TotalBsmtSF", "TotalAreaAbvGrd", "TotalBath", "KitchenQual", "Fireplaces", "FireplaceQu", "GarageFinish", "GarageArea", "WoodDeckInd", "ScreenPorch")
+step_model <- lm(logSalePrice ~ ., data=AmesPS)
+
+write.csv(AmesPS, "AmesPS") #Crearted a new dataset AmesPS (PS stands for Post Stepwise)
+```
+
+## Lasso
+Here we use the LASSO variable selection technique to remove some unimportant variables.
+```
+
+AmesPS$OverallCond <- as.numeric(AmesPS$OverallCond)
+AmesPS$OverallCondInd <- as.numeric(AmesPS$OverallCond>=5)
+
+step_model_2 <- lm(logSalePrice ~ logLotArea + MSZoning + LandContour + OverallCondInd + ExterCond + Foundation + TotalBsmtSF + TotalAreaAbvGrd + TotalBath + KitchenQual + Fireplaces + FireplaceQu + GarageFinish + GarageArea + WoodDeckInd + ScreenPorch,data=AmesPS)
+y2 <- AmesPS$logSalePrice
+x2 <-model.matrix(step_model_2)
+cv_model_2 <- cv.glmnet(x2, y2, alpha = 1)
+plot(cv_model_2)
+optimum_lambda_2 <- exp(-5)
+groups2 <- c(1,2,3,3,3,4,4,4,5,6,6,6,6,7,7,7,7,7,8,9,10,11,11,11,11,12,12,12,12,13,13,13,13,13,14,14,14,15,16,17)
+final_model_LASSO <- cv.gglasso(x2, y2, group = groups2, lambda = optimum_lambda_2, intercept=FALSE)
+coef(final_model_LASSO)
+final_model_OLS <- lm(logSalePrice ~ logLotArea + OverallCondInd + Foundation + TotalBsmtSF + TotalAreaAbvGrd + TotalBath + KitchenQual + Fireplaces + GarageFinish + GarageArea + WoodDeckInd + ScreenPorch, data=AmesPS)
+summary(final_model_OLS)
+```
+
+## Outlier analysis
+In our data we had several outliers so we performed some analysis on these to determine whether or not we can remove them.
+```
+AmesPSO <- AmesPS[-c(170,1405,2045,2046),] 
+OLS_outlier_overall <- lm(logSalePrice ~ logLotArea + OverallCondInd + Foundation + TotalBsmtSF + TotalAreaAbvGrd + TotalBath + KitchenQual + Fireplaces + GarageFinish + GarageArea + WoodDeckInd + ScreenPorch, data=AmesPSO)
+bptest(OLS_outlier_overall)
+plot(OLS_outlier_overall, col = colours3)
+par(mfrow = c(2,2))
+              
+influence.diagnostics(final_model_OLS)
+d <- dffits(final_model_OLS)[170]
+influential <- which(abs(d) > 2*sqrt(length(d)/length(final_model_OLS$coefficients)))
+influential
+            
+ betas <- dfbetas(final_model_OLS)
+influencebeta <- which(abs(betas) > 2/sqrt(nrow(betas)))
+influencebeta
+            
+largelot.ols <- AmesPSO[which(AmesPSO$logLotArea > 9.5),]
+OLS_largelot.ols <- lm(logSalePrice ~ logLotArea + OverallCondInd + Foundation + TotalBsmtSF + TotalAreaAbvGrd + TotalBath + KitchenQual + Fireplaces + GarageFinish + GarageArea + WoodDeckInd + ScreenPorch, data=largelot.ols)
+            
+condlessfive.ols <- AmesPSO[which(AmesPSO$OverallCond == "4" |
+                                  AmesPSO$OverallCond == "3" |
+                                  AmesPSO$OverallCond == "2" |
+                                  AmesPSO$OverallCond == "1"),]
+OLS_condlessfive.ols <- lm(logSalePrice ~ logLotArea + OverallCondInd + Foundation + TotalBsmtSF + TotalAreaAbvGrd + TotalBath + KitchenQual + Fireplaces +                                         GarageFinish + GarageArea + WoodDeckInd + ScreenPorch, data=condlessfive.ols)
+            
+            
+garagezero.ols <- AmesPSO[which(AmesPSO$GarageArea == 0),]
+garagezero.ols$GarageArea <- as.numeric(garagezero.ols$GarageArea)
+OLS_garagezero.ols <- lm(logSalePrice ~ logLotArea + OverallCondInd + Foundation + TotalBsmtSF + TotalAreaAbvGrd + TotalBath + KitchenQual + Fireplaces +                                            WoodDeckInd + ScreenPorch, data=garagezero.ols)
+            
+not.conc.ols <- AmesPSO[which(AmesPSO$Foundation == "Slab" |
+                              AmesPSO$Foundation == "BrkTil" |
+                              AmesPSO$Foundation == "Stone"),]
+OLS_not.conc.ols <- lm(logSalePrice ~ logLotArea + OverallCondInd + Foundation + TotalBsmtSF + TotalAreaAbvGrd + TotalBath + KitchenQual + Fireplaces + 
+                        GarageFinish + GarageArea + WoodDeckInd + ScreenPorch, data=not.conc.ols)
+```
+We then determined that we are justified to remove the outliers so carried on with dataset "AmesPSO" and our final model "OLS_outlier_overall".
+
+
+## Cross validation
+Here we perform K-fold cross validation setting K=10.
+```
+ctrl <- trainControl(method = "cv", number = 10) #Defines the 10-fold cross validation method 
+modelCV <- train(final_model_OLS, data = AmesPS, method = "lm", trControl = ctrl) #Performs the 10-fold cross validation method 
+print(modelCV) #Gives RMSE, R-squared and MAE 
+fold_data <- lapply(modelCV$control$index, function(index) AmesPS[index,]) %>%  
+bind_rows(.id = "Fold") #Gets the fold subsets 
+ggplot(fold_data, aes(logLotArea, col = Fold)) + geom_density()+ggtitle("Density plot of logLotArea for each cv-fold") #Plots the density for each fold of logLotArea 
+densityplot(logLotArea,main="Density plot for logLotArea") #Plots the density of logLotArea 
+```
+
+## Multicollinearity
+Here we test multicollinearity of the parameters of our final model using VIF and condition index to ensure the variables are not multicollinear.
+```
+vif_valuesfinal <- ols_vif_tol(OLS_outlier_overall) #VIF with each levels individual VIF
+vif_valuesfinal
+grouped_vif_valuesfinal <- vif(OLS_outlier_overall) #VIF with levels grouped
+grouped_vif_valuesfinal
+ols_eigen_cindex(OLS_outlier_overall) #CI
+ols_coll_diag(OLS_outlier_overall) #VIF, tolerance and CI
+ols_correlations(OLS_outlier_overall) #Zero order, part and partial correlations
+```
+
+## Analysis
+We now plot predicted vs actual values and group different groups of data points.
+                      
+```
+ggplot() +#position = position_jitter(w = 0.1, h = 0)
+geom_point(data = AmesPSO, aes(x = predict(OLS_outlier_overall), y = logSalePrice, colour = "black"))+
+#geom_point(data = largelot.ols, aes(x = predict(OLS_largelot), y = logSalePrice, colour = "red") )+
+geom_point(data = condlessfive.ols, aes(x = predict(OLS_condlessfive.ols), y = logSalePrice, colour = "green"))+
+geom_point(data = garagezero.ols, aes(x = predict(OLS_garagezero.ols), y = logSalePrice, colour = "purple"))+
+geom_point(data = not.conc.ols, aes(x = predict(OLS_not.conc.ols), y = logSalePrice, colour = "yellow"))+
+scale_color_identity(name = "Label",
+                    breaks = c("black", "green", "purple", "yellow"),
+                    labels = c("Unlabelled", "Overall Condition < 5", "No Garage", "Non-Concrete foundation"),
+                    guide = "legend") +
+                    geom_abline(intercept=0, slope=1, colour="blue") + 
+                    labs(x='Predicted Values', y='Actual Values', title='Predicted vs. Actual Values of logSalePrice')
+```
+Here we rank the variables in order of importance.
+```
+relImportance <- calc.relimp(final_model_OLS, type = "lmg", rela = TRUE)
+relImportance
+sort(relImportance$lmg, decreasing=TRUE)
+```
